@@ -644,11 +644,27 @@ function renderCocina(){
    h+=`</div>`;
   });
   if(o.note) h+=`<p class="small">📝 ${o.note}</p>`;
-  h+=`<button class="btn-primary" onclick="markReady('${o.id}')">✅ Marcar lista</button></div>`;
+  h+=`<div class="flex" style="margin-top:10px">
+   <button class="btn-ghost" onclick="printComanda('${o.id}')">🖨️ Imprimir</button>
+   <button class="btn-primary" onclick="markReady('${o.id}')">✅ Marcar lista</button>
+  </div></div>`;
  });
  return h;
 }
 async function markReady(id){ STATE.orders[id].status="lista"; await save(); }
+function printComanda(id){
+ const o=STATE.orders[id];
+ if(!o) return;
+ let h=`<h3>Cazo Loco — Comanda de cocina</h3><p>${orderLabel(o)} · ${new Date(o.ts).toLocaleString()}</p><hr>`;
+ const rounds=(o.rounds&&o.rounds.length)?o.rounds:[{n:1,items:o.items,ts:o.ts}];
+ rounds.forEach(r=>{
+  h+=`<p style="margin:10px 0 4px"><b>Pedido ${r.n}${rounds.length>1?" de "+rounds.length:""}</b> — ${new Date(r.ts).toLocaleTimeString()}</p>`;
+  r.items.forEach(it=>h+=`<div>${it.qty}x ${it.n}</div>`);
+ });
+ if(o.note) h+=`<hr><p>📝 ${o.note}</p>`;
+ document.getElementById("print-area").innerHTML=h;
+ window.print();
+}
 
 function renderCaja(){
  let h=`<button class="btn-ghost" onclick="go('mesas')">← Mesas</button><h2 style="color:var(--brown)">💵 Caja — ${activeTable?tableLabel(activeTable):""}</h2>`;

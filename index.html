@@ -127,6 +127,9 @@ const firebaseConfig = {
 /* ===================================================== */
 
 const CARNE_TIPOS=["Maciza jugosa","Buche","Chamorro","Cuerito","Surtido"];
+const TACO_TIPOS=["Maciza","Surtido"];
+const SALSAS=["Salsa roja","Guacamole","Pico de gallo","Cebolla con habanero"];
+const SALSA_PRECIO=13, SALSA_MAX=3;
 
 const MENU=[
  {cat:"Carnitas",items:[
@@ -152,11 +155,13 @@ function defaultState(){
   tables:{1:{status:"libre"},2:{status:"libre"},3:{status:"libre"}},
   orders:{},
   sales:[],
+  archives:[],
  };
 }
 let STATE=defaultState(), session=null, view="login", cart=[], activeTable=null, lastSale=null;
 let fsDoc=null, synced=false, statusMsg="Conectando...";
-let draftNote="", draftCustomerName="";
+let draftNote="", draftCustomerName="", editingOrderId=null;
+let customizingTacoIdx=null;
 
 function firebaseReady(){
  return firebaseConfig.apiKey && firebaseConfig.apiKey.indexOf("PEGA_AQUI")===-1;
@@ -278,23 +283,37 @@ function renderMesas(){
  h+="</div>";
  return h;
 }
+function activeOrderFor(table){
+ return Object.values(STATE.orders).find(o=>o.table===table&&o.status!=="entregada");
+}
+function startEditingOrFresh(id){
+ const existing=activeOrderFor(id);
+ if(existing){
+  editingOrderId=existing.id;
+  cart=existing.items.map(it=>({...it}));
+  draftNote=existing.note||"";
+  draftCustomerName=existing.customerName||"";
+ } else {
+  editingOrderId=null; cart=[]; draftNote=""; draftCustomerName="";
+ }
+}
 function openTable(id){
  activeTable=id;
  const t=STATE.tables[id];
- if(t.status==="libre"){ cart=[]; draftNote=""; draftCustomerName=""; view="orden"; render(); return; }
+ if(t.status==="libre"){ editingOrderId=null; cart=[]; draftNote=""; draftCustomerName=""; view="orden"; render(); return; }
  if(t.status==="ocupada"){
   if(session.role==="cajero"||session.role==="admin"){ view="caja"; render(); }
-  else { cart=[]; draftNote=""; draftCustomerName=""; view="orden"; render(); }
+  else { startEditingOrFresh(id); view="orden"; render(); }
  }
 }
 function newTakeout(){
  activeTable="TL"+Date.now().toString().slice(-6);
- cart=[]; draftNote=""; draftCustomerName=""; view="orden"; render();
+ editingOrderId=null; cart=[]; draftNote=""; draftCustomerName=""; view="orden"; render();
 }
 function openPseudo(id){
  activeTable=id;
  if(session.role==="cajero"||session.role==="admin"){ view="caja"; }
- else { cart=[]; draftNote=""; draftCustomerName=""; view="orden"; }
+ else { startEditingOrFresh(id); view="orden"; }
  render();
 }
 
@@ -305,16 +324,17 @@ function cartPanel(){
   lines+=`<div class="order-line pop"><span>${it.qty}x ${it.n}</span><span>${fmt(it.p*it.qty)} <button class="btn-ghost" style="padding:4px 8px" onclick="rmItem(${i})">✕</button></span></div>`;
  });
  return `<div class="orden-cart">
-  <h3>🧾 Comanda actual</h3>
+  <h3>🧾 ${editingOrderId?"Comanda (agregando más)":"Comanda actual"}</h3>
   ${cart.length===0?'<p class="small">Sin productos aún</p>':lines}
   <div class="total">${fmt(total)}</div>
-  <button class="btn-primary" style="width:100%;margin-top:10px" onclick="sendOrder()">🔥 Enviar a cocina</button>
+  <button class="btn-primary" style="width:100%;margin-top:10px" onclick="sendOrder()">🔥 ${editingOrderId?"Actualizar orden":"Enviar a cocina"}</button>
  </div>`;
 }
 
 function renderOrden(){
  const takeout=isTakeoutId(activeTable);
  let h=`<button class="btn-ghost" onclick="go('mesas')">← Mesas</button><h2 style="color:var(--brown)">${orderLabel({table:activeTable,customerName:draftCustomerName})} — Orden</h2>`;
+ if(editingOrderId) h+=`<p class="small" style="margin-top:-14px">➕ Ya hay una orden en curso para esta mesa/pedido — lo que agregues se suma a la misma comanda, un solo ticket.</p>`;
  h+=`<div class="orden-grid"><div class="orden-menu">`;
 
  if(takeout){
@@ -324,7 +344,7 @@ function renderOrden(){
     <label class="small">Nombre del cliente</label>
     <input type="text" id="customerName" placeholder="¿A nombre de quién?" value="${draftCustomerName}" oninput="draftCustomerName=this.value">
    </div>
-   <div class="flex" style="align-items:flex-end">
+   <div class="flex" style="align-items:flex-end;margin-bottom:12px">
     <div style="flex:1;min-width:140px">
      <label class="small">Tipo de carne</label>
      <select id="qCarneTipo">${CARNE_TIPOS.map(t=>`<option value="${t}">${t}</option>`).join("")}</select>
@@ -333,17 +353,38 @@ function renderOrden(){
      <label class="small">Monto ($)</label>
      <input type="number" id="qCarneMonto" placeholder="120">
     </div>
-    <button class="btn-primary" onclick="addQuickCarne()">+ Agregar</button>
    </div>
+   ${salsaCheckboxes("qSalsa")}
+   <button class="btn-primary" style="width:100%;margin-top:12px" onclick="addQuickCarne()">+ Agregar</button>
   </div>`;
  }
 
  MENU.forEach(c=>{
   h+=`<div class="cat-title">${c.cat}</div>`;
-  c.items.forEach((it,i)=>{
-   h+=`<div class="item-row"><div>${it.n}<div class="price">${fmt(it.p)}</div></div>
-   <button class="btn-ghost" onclick="addItem('${c.cat}',${i})">+ Agregar</button></div>`;
-  });
+  if(c.cat==="Tacos y Tortas"){
+   c.items.forEach((it,i)=>{
+    if(customizingTacoIdx===i){
+     h+=`<div class="quick-box pop" style="margin-bottom:9px">
+      <div style="font-weight:700;margin-bottom:8px">${it.n} <span class="small">${fmt(it.p)} base</span></div>
+      <label class="small">Tipo de carne</label>
+      <select id="tacoTipo_${i}">${TACO_TIPOS.map(t=>`<option value="${t}">${t}</option>`).join("")}</select>
+      <div style="margin-top:10px">${salsaCheckboxes("tacoSalsa_"+i)}</div>
+      <div class="flex" style="margin-top:12px">
+       <button class="btn-primary" onclick="confirmCustomizeTaco(${i})">✅ Agregar</button>
+       <button class="btn-ghost" onclick="cancelCustomizeTaco()">Cancelar</button>
+      </div>
+     </div>`;
+    } else {
+     h+=`<div class="item-row"><div>${it.n}<div class="price">${fmt(it.p)}</div></div>
+     <button class="btn-ghost" onclick="openCustomizeTaco(${i})">+ Agregar</button></div>`;
+    }
+   });
+  } else {
+   c.items.forEach((it,i)=>{
+    h+=`<div class="item-row"><div>${it.n}<div class="price">${fmt(it.p)}</div></div>
+    <button class="btn-ghost" onclick="addItem('${c.cat}',${i})">+ Agregar</button></div>`;
+   });
+  }
  });
 
  if(!takeout){
@@ -378,19 +419,72 @@ function addCustomItem(){
  cart.push({n:desc+" ("+fmt(price)+")",p:price,qty:1});
  render();
 }
+function salsaCheckboxes(prefix){
+ let h=`<div><label class="small">Salsas (elige hasta ${SALSA_MAX} — $${SALSA_PRECIO} c/u)</label>
+ <div class="flex" style="flex-wrap:wrap;gap:8px;margin-top:6px">`;
+ SALSAS.forEach((s,idx)=>{
+  h+=`<label class="small" style="display:flex;align-items:center;gap:5px;background:#faf3ec;border:1px solid #e6d8c8;border-radius:8px;padding:6px 10px;cursor:pointer">
+   <input type="checkbox" id="${prefix}_${idx}" value="${s}" style="width:auto"> ${s}
+  </label>`;
+ });
+ h+=`</div></div>`;
+ return h;
+}
+function readSalsas(prefix){
+ const chosen=[];
+ SALSAS.forEach((s,idx)=>{
+  const el=document.getElementById(`${prefix}_${idx}`);
+  if(el&&el.checked) chosen.push(s);
+ });
+ if(chosen.length>SALSA_MAX){
+  alert(`Solo puedes elegir hasta ${SALSA_MAX} salsas`);
+  return null;
+ }
+ return chosen;
+}
 function addQuickCarne(){
  const tipo=document.getElementById("qCarneTipo").value;
  const monto=Number(document.getElementById("qCarneMonto").value);
  if(!monto||monto<=0){ alert("Escribe un monto válido"); return; }
- cart.push({n:"Carnitas "+tipo+" ("+fmt(monto)+")", p:monto, qty:1});
+ const salsas=readSalsas("qSalsa");
+ if(salsas===null) return;
+ const salsaTotal=salsas.length*SALSA_PRECIO;
+ let n="Carnitas "+tipo+" ("+fmt(monto)+")";
+ if(salsas.length) n+=" + "+salsas.join(", ");
+ cart.push({n, p:monto+salsaTotal, qty:1});
+ SALSAS.forEach((s,idx)=>{ const el=document.getElementById(`qSalsa_${idx}`); if(el) el.checked=false; });
+ render();
+}
+function openCustomizeTaco(i){ customizingTacoIdx=i; render(); }
+function cancelCustomizeTaco(){ customizingTacoIdx=null; render(); }
+function confirmCustomizeTaco(i){
+ const cat=MENU.find(c=>c.cat==="Tacos y Tortas");
+ const it=cat.items[i];
+ const tipoEl=document.getElementById("tacoTipo_"+i);
+ const tipo=tipoEl?tipoEl.value:"";
+ const salsas=readSalsas("tacoSalsa_"+i);
+ if(salsas===null) return;
+ const salsaTotal=salsas.length*SALSA_PRECIO;
+ let n=it.n+" ("+tipo+")";
+ if(salsas.length) n+=" + "+salsas.join(", ");
+ const price=it.p+salsaTotal;
+ const ex=cart.find(x=>x.n===n);
+ if(ex) ex.qty++; else cart.push({n, p:price, qty:1});
+ customizingTacoIdx=null;
  render();
 }
 async function sendOrder(){
  if(cart.length===0){ alert("Agrega al menos un producto"); return; }
- const id="o"+Date.now();
- STATE.orders[id]={id,table:activeTable,items:cart,note:draftNote,customerName:draftCustomerName,status:"pendiente",employee:session.name,ts:Date.now()};
+ if(editingOrderId && STATE.orders[editingOrderId]){
+  const o=STATE.orders[editingOrderId];
+  o.items=cart; o.note=draftNote; o.customerName=draftCustomerName;
+  o.status="pendiente"; o.ts=Date.now();
+ } else {
+  const id="o"+Date.now();
+  STATE.orders[id]={id,table:activeTable,items:cart,note:draftNote,customerName:draftCustomerName,status:"pendiente",employee:session.name,ts:Date.now()};
+ }
  if(STATE.tables[activeTable]) STATE.tables[activeTable]={status:"ocupada"};
- cart=[]; draftNote=""; draftCustomerName="";
+ cart=[]; draftNote=""; draftCustomerName=""; editingOrderId=null;
  await save();
  view="mesas"; render();
 }
@@ -465,11 +559,14 @@ function doPrint(){
  window.print();
 }
 
+function isSameDay(ts,ref){ const a=new Date(ts),b=new Date(ref); return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate(); }
+function isSameMonth(ts,ref){ const a=new Date(ts),b=new Date(ref); return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth(); }
 function renderAdmin(){
  const now=Date.now(), day=86400000;
- const today=STATE.sales.filter(s=>now-s.ts<day);
+ STATE.archives=STATE.archives||[];
+ const today=STATE.sales.filter(s=>isSameDay(s.ts,now));
  const week=STATE.sales.filter(s=>now-s.ts<7*day);
- const month=STATE.sales.filter(s=>now-s.ts<30*day);
+ const month=STATE.sales.filter(s=>isSameMonth(s.ts,now));
  const sum=arr=>arr.reduce((a,s)=>a+s.total,0);
  let h=`<h2 style="color:var(--brown)">⚙️ Panel de administrador</h2>`;
  h+=`<div class="grid">
@@ -477,6 +574,22 @@ function renderAdmin(){
   <div class="card"><b>Semana</b><div class="total">${fmt(sum(week))}</div><span class="small">${week.length} ventas</span></div>
   <div class="card"><b>Mes</b><div class="total">${fmt(sum(month))}</div><span class="small">${month.length} ventas</span></div>
  </div>`;
+
+ h+=`<div class="cat-title">🔒 Cierre de caja</div>
+ <p class="small">Guarda el total de hoy o del mes en el historial y reinicia el contador para el siguiente periodo.</p>
+ <div class="flex" style="margin-bottom:8px">
+  <button class="btn-ghost" onclick="closeDay()">🔒 Cerrar el día de hoy</button>
+  <button class="btn-ghost" onclick="closeMonth()">🔒 Cerrar el mes actual</button>
+ </div>`;
+
+ h+=`<div class="cat-title">📅 Historial de cierres</div>`;
+ const archives=[...STATE.archives].sort((a,b)=>b.ts-a.ts);
+ if(archives.length===0) h+=`<p class="small">Aún no has cerrado ningún día o mes.</p>`;
+ archives.forEach(a=>{
+  h+=`<div class="item-row"><div>${a.label}<div class="small">${a.type==='dia'?'Cierre de día':'Cierre de mes'} · ${fmt(a.total)} · ${a.count} ventas</div></div>
+   <button class="btn-ghost" onclick="printArchive('${a.id}')">🖨️ Imprimir</button></div>`;
+ });
+
  h+=`<div class="cat-title">🧾 Ventas recientes</div>`;
  const recent=[...STATE.sales].sort((a,b)=>b.ts-a.ts).slice(0,8);
  if(recent.length===0) h+=`<p class="small">Aún no hay ventas</p>`;
@@ -492,6 +605,47 @@ function reprint(saleId){
  const sale=STATE.sales.find(s=>s.id===saleId);
  if(!sale) return;
  lastSale=sale; view="ventaFinal"; render();
+}
+async function closeDay(){
+ const now=Date.now();
+ const sales=STATE.sales.filter(s=>isSameDay(s.ts,now));
+ if(sales.length===0){ alert("No hay ventas de hoy para cerrar."); return; }
+ const total=sales.reduce((a,s)=>a+s.total,0);
+ const label=new Date(now).toLocaleDateString('es-MX',{day:'2-digit',month:'long',year:'numeric'});
+ if(!confirm(`¿Cerrar el día ${label}?\nTotal: ${fmt(total)} (${sales.length} ventas)\nSe guardará en el historial y "Hoy" se reiniciará a $0.`)) return;
+ STATE.archives=STATE.archives||[];
+ STATE.archives.unshift({id:"d"+Date.now(),type:"dia",label,total,count:sales.length,ts:now,byPay:payBreakdown(sales),sales});
+ const ids=new Set(sales.map(s=>s.id));
+ STATE.sales=STATE.sales.filter(s=>!ids.has(s.id));
+ await save();
+}
+async function closeMonth(){
+ const now=Date.now();
+ const sales=STATE.sales.filter(s=>isSameMonth(s.ts,now));
+ if(sales.length===0){ alert("No hay ventas de este mes para cerrar."); return; }
+ const total=sales.reduce((a,s)=>a+s.total,0);
+ const label=new Date(now).toLocaleDateString('es-MX',{month:'long',year:'numeric'});
+ if(!confirm(`¿Cerrar el mes de ${label}?\nTotal: ${fmt(total)} (${sales.length} ventas)\nSe guardará en el historial y "Mes" se reiniciará a $0.`)) return;
+ STATE.archives=STATE.archives||[];
+ STATE.archives.unshift({id:"m"+Date.now(),type:"mes",label,total,count:sales.length,ts:now,byPay:payBreakdown(sales),sales});
+ const ids=new Set(sales.map(s=>s.id));
+ STATE.sales=STATE.sales.filter(s=>!ids.has(s.id));
+ await save();
+}
+function payBreakdown(sales){
+ const b={efectivo:0,tarjeta:0,mixto:0};
+ sales.forEach(s=>{ b[s.pay]=(b[s.pay]||0)+s.total; });
+ return b;
+}
+function printArchive(archiveId){
+ const a=STATE.archives.find(x=>x.id===archiveId);
+ if(!a) return;
+ let h=`<h3>Cazo Loco — Carnitas con sabor</h3><p>${a.type==='dia'?'Cierre de día':'Cierre de mes'}: ${a.label}</p><hr>`;
+ h+=`<p>Ventas totales: ${a.count}</p>`;
+ h+=`<p>Efectivo: ${fmt(a.byPay.efectivo||0)}</p><p>Tarjeta: ${fmt(a.byPay.tarjeta||0)}</p><p>Mixto: ${fmt(a.byPay.mixto||0)}</p>`;
+ h+=`<hr><b>Total: ${fmt(a.total)}</b>`;
+ document.getElementById("print-area").innerHTML=h;
+ window.print();
 }
 
 boot();

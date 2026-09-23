@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>El Cazo Loco - POS</title>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<style>
+:root{
+  --brown:#6b3a1f; --red:#c0392b; --cream:#fdf3e7; --white:#ffffff;
+  --text:#2b1b12; --ok:#2e7d32; --gray:#8a7b6c;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){ --cream:#241a12; --white:#332419; --text:#f3e9dc; --gray:#b8a894;}
+}
+:root[data-theme="dark"]{ --cream:#241a12; --white:#332419; --text:#f3e9dc; --gray:#b8a894;}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:var(--cream);color:var(--text);
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);}
+header{background:var(--brown);color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;
+  position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
+header h1{font-size:1.2rem;margin:0}
+header .sub{font-size:.8rem;opacity:.85}
+button{cursor:pointer;border:none;border-radius:10px;padding:10px 14px;font-size:1rem;font-weight:600}
+.btn-primary{background:var(--red);color:#fff}
+.btn-outline{background:transparent;border:2px solid #fff;color:#fff}
+.btn-ghost{background:var(--white);color:var(--brown);border:1px solid var(--gray)}
+main{max-width:900px;margin:0 auto;padding:16px;overflow-x:auto}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+.card{background:var(--white);border-radius:14px;padding:16px;box-shadow:0 2px 6px rgba(0,0,0,.08)}
+.table-card{text-align:center;font-weight:700;font-size:1.1rem;cursor:pointer}
+.status-libre{border:3px solid var(--ok)}
+.status-ocupada{border:3px solid var(--red)}
+.status-cobrar{border:3px solid #d4a017}
+.tag{display:inline-block;font-size:.75rem;padding:2px 8px;border-radius:20px;margin-top:6px}
+.tag-libre{background:#e6f4ea;color:var(--ok)}
+.tag-ocupada{background:#fdecea;color:var(--red)}
+.tag-cobrar{background:#fff6dd;color:#8a6d00}
+.cat-title{color:var(--brown);border-bottom:2px solid var(--red);padding-bottom:4px;margin-top:22px}
+.item-row{display:flex;justify-content:space-between;align-items:center;background:var(--white);padding:10px 12px;border-radius:10px;margin-bottom:8px;gap:10px}
+.item-row .price{color:var(--gray);font-size:.85rem}
+.order-line{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed var(--gray)}
+input,select,textarea{font-size:1rem;padding:8px;border-radius:8px;border:1px solid var(--gray);width:100%}
+.login-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));max-width:600px;margin:40px auto}
+.role-card{background:var(--white);border-radius:16px;padding:24px;text-align:center;box-shadow:0 3px 10px rgba(0,0,0,.1)}
+.role-card h3{color:var(--brown);margin:8px 0}
+.total{font-size:1.4rem;font-weight:800;color:var(--red);text-align:right;margin-top:10px}
+.flex{display:flex;gap:10px;flex-wrap:wrap}
+.small{font-size:.8rem;color:var(--gray)}
+.sync-warn{background:#c0392b;color:#fff;padding:10px 14px;text-align:center;font-weight:700;font-size:.9rem}
+.status-strip{padding:4px 10px;text-align:center;font-size:.72rem}
+.status-ok{background:#173a1f;color:#c9f2d1}
+.status-bad{background:#3a1717;color:#f2c9c9}
+#print-area{display:none}
+@media print{
+  body *{visibility:hidden}
+  #print-area,#print-area *{visibility:visible}
+  #print-area{position:absolute;top:0;left:0;width:100%;padding:10px;display:block}
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="print-area"></div>
+<script>
+/* ====== CONFIGURA AQUÍ TU PROYECTO DE FIREBASE ======
+   Pega los valores que te dio la consola de Firebase (Configuración del proyecto → tus apps → SDK setup and configuration).
+   Sin esto, el programa funciona pero NO se sincroniza entre dispositivos. */
+const firebaseConfig = {
+  apiKey: "PEGA_AQUI_TU_API_KEY",
+  authDomain: "PEGA_AQUI_TU_PROYECTO.firebaseapp.com",
+  projectId: "PEGA_AQUI_TU_PROYECTO_ID",
+  storageBucket: "PEGA_AQUI_TU_PROYECTO.appspot.com",
+  messagingSenderId: "PEGA_AQUI",
+  appId: "PEGA_AQUI"
+};
+/* ===================================================== */
+
+const MENU=[
+ {cat:"Carnitas",items:[
+   {n:"Maciza/Buche ¼kg",p:80},{n:"Maciza/Buche ½kg",p:150},{n:"Maciza/Buche 1kg",p:300},
+   {n:"Surtido ¼kg",p:75},{n:"Surtido ½kg",p:145},{n:"Surtido 1kg",p:290}]},
+ {cat:"Paquetes",items:[
+   {n:"Medio Loco Surtido",p:180},{n:"Medio Loco Maciza",p:185},
+   {n:"Kilo Loco Surtido",p:340},{n:"Kilo Loco Maciza",p:350},{n:"Kilo Mixto",p:355}]},
+ {cat:"Tacos y Tortas",items:[
+   {n:"Taco Loco",p:22},{n:"Torta Loca de Carnitas",p:45},{n:"Quesadilla de Harina",p:50}]},
+ {cat:"Complementos",items:[
+   {n:"Refresco 400ml desechable",p:25},{n:"Refresco 500ml vidrio",p:28},
+   {n:"Tortillas ½kg",p:15},{n:"Tortillas 1kg",p:30},{n:"Salsa extra",p:13}]},
+];
+const USERS=[
+ {role:"mesero",name:"Mesero"},
+ {role:"cocinero",name:"Cocinero"},
+ {role:"cajero",name:"Cajero"},
+ {role:"admin",name:"Administrador"},
+];
+function defaultState(){
+ return {
+  tables:{1:{status:"libre"},2:{status:"libre"},3:{status:"libre"}},
+  orders:{},
+  sales:[],
+  inventory:{
+   carnitas:{name:"Carnitas (kg)",stock:10,min:2},
+   tortillas:{name:"Tortillas (kg)",stock:8,min:1},
+   ref400:{name:"Refresco 400ml",stock:40,min:10},
+   ref500:{name:"Refresco 500ml",stock:40,min:10},
+  }
+ };
+}
+let STATE=defaultState(), session=null, view="login", cart=[], activeTable=null;
+let fsDoc=null, synced=false, statusMsg="Conectando...";
+
+function firebaseReady(){
+ return firebaseConfig.apiKey && firebaseConfig.apiKey.indexOf("PEGA_AQUI")===-1;
+}
+
+async function boot(){
+ if(!firebaseReady()){
+  statusMsg="⚠️ Firebase no está configurado todavía (edita firebaseConfig en el código). Trabajando solo en este dispositivo, sin compartir.";
+  synced=false; render(); return;
+ }
+ try{
+  const app=firebase.initializeApp(firebaseConfig);
+  const dbFs=firebase.firestore();
+  fsDoc=dbFs.collection("cazoloco").doc("main");
+  const snap=await fsDoc.get();
+  if(snap.exists){ STATE=snap.data(); }
+  else { await fsDoc.set(STATE); }
+  fsDoc.onSnapshot(s=>{
+   if(s&&s.exists){ STATE=s.data(); render(); }
+  }, err=>{
+   synced=false; statusMsg="❌ Error de sincronización: "+err.message; render();
+  });
+  synced=true; statusMsg="Sincronizado con Firebase ✅";
+ }catch(e){
+  synced=false; statusMsg="❌ No se pudo conectar a Firebase: "+(e&&e.message?e.message:e);
+ }
+ render();
+}
+async function save(){
+ if(fsDoc){
+  try{ await fsDoc.set(STATE); statusMsg="Sincronizado con Firebase ✅"; synced=true; }
+  catch(e){ statusMsg="❌ Error al guardar: "+(e&&e.message?e.message:e); synced=false; }
+ }
+ render();
+}
+function fmt(n){return "$"+Number(n).toFixed(0)}
+
+function statusStrip(){
+ return `<div class="status-strip ${synced?"status-ok":"status-bad"}">${statusMsg}</div>`;
+}
+function render(){
+ const app=document.getElementById("app");
+ if(view==="login"){ app.innerHTML=statusStrip()+renderLogin(); return; }
+ const body = view==="mesas"?renderMesas():
+  view==="orden"?renderOrden():
+  view==="cocina"?renderCocina():
+  view==="caja"?renderCaja():
+  view==="admin"?renderAdmin():"";
+ app.innerHTML = statusStrip()+`<header><div><h1>🌮 El Cazo Loco</h1><div class="sub">${session.name}</div></div>
+  <button class="btn-outline" onclick="logout()">Salir</button></header>
+  ${synced?"":'<div class="sync-warn">⚠️ SIN SINCRONIZAR — lo que hagas aquí no se verá en otros aparatos hasta que se resuelva la conexión.</div>'}
+  <main>${navBar()}${body}</main>`;
+}
+function navBar(){
+ let tabs=[];
+ if(session.role==="mesero") tabs=[["mesas","Mesas"]];
+ if(session.role==="cocinero") tabs=[["cocina","Cocina"]];
+ if(session.role==="cajero") tabs=[["mesas","Mesas"],["caja","Caja"]];
+ if(session.role==="admin") tabs=[["mesas","Mesas"],["cocina","Cocina"],["caja","Caja"],["admin","Panel"]];
+ return `<div class="flex" style="margin-bottom:16px">`+tabs.map(t=>`<button class="${view===t[0]?'btn-primary':'btn-ghost'}" onclick="go('${t[0]}')">${t[1]}</button>`).join("")+`</div>`;
+}
+function go(v){ view=v; render(); }
+function logout(){ session=null; view="login"; render(); }
+
+function renderLogin(){
+ return `<header><h1 style="margin:0">🌮 El Cazo Loco — Punto de Venta</h1></header>
+ <main><p class="small" style="text-align:center">Toca tu rol para entrar</p><div class="login-grid">
+  ${USERS.map(u=>`<div class="role-card" style="cursor:pointer" onclick="doLogin('${u.role}')">
+   <div style="font-size:2rem">${u.role==="mesero"?"🧑‍🍳":u.role==="cocinero"?"🔥":u.role==="cajero"?"💵":"⚙️"}</div>
+   <h3>${u.name}</h3>
+   <button class="btn-primary" style="width:100%">Entrar</button>
+  </div>`).join("")}
+ </div></main>`;
+}
+function doLogin(role){
+ session=USERS.find(x=>x.role===role);
+ view=(role==="cocinero"?"cocina":"mesas"); render();
+}
+
+function tableLabel(t){ return STATE.tables[t] ? "Mesa "+t : "Para llevar"; }
+function pendingTakeout(){
+ const map={};
+ Object.values(STATE.orders).forEach(o=>{
+  if(!STATE.tables[o.table] && o.status!=="entregada"){
+   if(!map[o.table]) map[o.table]={table:o.table, ts:o.ts, total:0, count:0};
+   o.items.forEach(it=>{map[o.table].total+=it.p*it.qty; map[o.table].count+=it.qty;});
+  }
+ });
+ return Object.values(map).sort((a,b)=>a.ts-b.ts);
+}
+function renderMesas(){
+ let h=`<h2 style="color:var(--brown)">Mesas</h2><div class="grid">`;
+ [1,2,3].forEach(id=>{
+  const t=STATE.tables[id];
+  h+=`<div class="card table-card status-${t.status}" onclick="openTable(${id})">
+   Mesa ${id}<div class="tag tag-${t.status}">${t.status.toUpperCase()}</div></div>`;
+ });
+ h+="</div>";
+ h+=`<div class="cat-title">🥡 Para llevar</div>`;
+ if(session.role==="mesero"||session.role==="admin"){
+  h+=`<button class="btn-primary" onclick="newTakeout()">+ Nueva orden para llevar</button>`;
+ }
+ const tk=pendingTakeout();
+ if(tk.length===0) h+=`<p class="small">Sin pedidos para llevar pendientes</p>`;
+ h+=`<div class="grid" style="margin-top:10px">`;
+ tk.forEach(o=>{
+  h+=`<div class="card table-card status-ocupada" onclick="openPseudo('${o.table}')">
+   Pedido<div class="small">${o.count} productos</div><div class="tag tag-ocupada">${fmt(o.total)}</div></div>`;
+ });
+ h+="</div>";
+ return h;
+}
+function openTable(id){
+ activeTable=id;
+ const t=STATE.tables[id];
+ if(t.status==="libre"){ cart=[]; view="orden"; render(); return; }
+ if(t.status==="ocupada"){
+  if(session.role==="cajero"||session.role==="admin"){ view="caja"; render(); }
+  else { cart=[]; view="orden"; render(); }
+ }
+}
+function newTakeout(){
+ activeTable="TL"+Date.now().toString().slice(-6);
+ cart=[]; view="orden"; render();
+}
+function openPseudo(id){
+ activeTable=id;
+ if(session.role==="cajero"||session.role==="admin"){ view="caja"; }
+ else { cart=[]; view="orden"; }
+ render();
+}
+
+function renderOrden(){
+ let h=`<button class="btn-ghost" onclick="go('mesas')">← Mesas</button><h2 style="color:var(--brown)">${tableLabel(activeTable)} — Orden</h2>`;
+ MENU.forEach(c=>{
+  h+=`<div class="cat-title">${c.cat}</div>`;
+  c.items.forEach((it,i)=>{
+   h+=`<div class="item-row"><div>${it.n}<div class="price">${fmt(it.p)}</div></div>
+   <button class="btn-ghost" onclick="addItem('${c.cat}',${i})">+ Agregar</button></div>`;
+  });
+ });
+ h+=`<div class="cat-title">🧮 Monto personalizado (para carnitas por peso: $120, $170, $200...)</div>
+ <div class="item-row">
+  <input type="number" id="customPrice" placeholder="Precio, ej. 120" style="max-width:120px">
+  <input type="text" id="customDesc" placeholder="Descripción (ej. Carnitas al gusto)">
+  <button class="btn-ghost" onclick="addCustomItem()">+ Agregar</button>
+ </div>`;
+ h+=`<div class="cat-title">Nota (ej: tipo de carnitas, sin cebolla, salsas)</div><textarea id="note" placeholder="Escribe aquí..."></textarea>`;
+ h+=`<div class="cat-title">Comanda actual</div>`;
+ if(cart.length===0) h+=`<p class="small">Sin productos aún</p>`;
+ let total=0;
+ cart.forEach((it,i)=>{ total+=it.p*it.qty;
+  h+=`<div class="order-line"><span>${it.qty}x ${it.n}</span><span>${fmt(it.p*it.qty)} <button class="btn-ghost" onclick="rmItem(${i})">✕</button></span></div>`;
+ });
+ h+=`<div class="total">Total: ${fmt(total)}</div>
+ <button class="btn-primary" style="width:100%;margin-top:10px" onclick="sendOrder()">Enviar a cocina</button>`;
+ return h;
+}
+function addItem(cat,i){
+ const it=MENU.find(c=>c.cat===cat).items[i];
+ const ex=cart.find(x=>x.n===it.n);
+ if(ex) ex.qty++; else cart.push({n:it.n,p:it.p,qty:1});
+ render();
+}
+function rmItem(i){ cart.splice(i,1); render(); }
+function addCustomItem(){
+ const price=Number(document.getElementById("customPrice").value);
+ let desc=document.getElementById("customDesc").value.trim();
+ if(!price||price<=0){ alert("Escribe un precio válido"); return; }
+ if(!desc) desc="Carnitas al gusto";
+ cart.push({n:desc+" ("+fmt(price)+")",p:price,qty:1});
+ render();
+}
+async function sendOrder(){
+ if(cart.length===0){ alert("Agrega al menos un producto"); return; }
+ const note=document.getElementById("note").value;
+ const id="o"+Date.now();
+ STATE.orders[id]={id,table:activeTable,items:cart,note,status:"pendiente",employee:session.name,ts:Date.now()};
+ STATE.tables[activeTable]={status:"ocupada"};
+ cart=[];
+ await save();
+ view="mesas"; render();
+}
+
+function renderCocina(){
+ let h=`<h2 style="color:var(--brown)">Comandas de cocina</h2>`;
+ const pend=Object.values(STATE.orders).filter(o=>o.status!=="lista"&&o.status!=="entregada").sort((a,b)=>a.ts-b.ts);
+ if(pend.length===0) h+=`<p class="small">No hay órdenes pendientes 🎉</p>`;
+ pend.forEach(o=>{
+  h+=`<div class="card" style="margin-bottom:12px"><b>${tableLabel(o.table)}</b> · ${new Date(o.ts).toLocaleTimeString()}<br>`;
+  o.items.forEach(it=>h+=`<div class="order-line"><span>${it.qty}x ${it.n}</span></div>`);
+  if(o.note) h+=`<p class="small">📝 ${o.note}</p>`;
+  h+=`<button class="btn-primary" onclick="markReady('${o.id}')">Marcar lista</button></div>`;
+ });
+ return h;
+}
+async function markReady(id){ STATE.orders[id].status="lista"; await save(); }
+
+function renderCaja(){
+ let h=`<button class="btn-ghost" onclick="go('mesas')">← Mesas</button><h2 style="color:var(--brown)">Caja — ${activeTable?tableLabel(activeTable):""}</h2>`;
+ if(!activeTable){ h+=`<p class="small">Selecciona una mesa ocupada, o un pedido para llevar, desde "Mesas" para cobrar.</p>`; return h; }
+ const ords=Object.values(STATE.orders).filter(o=>o.table===activeTable&&o.status!=="entregada");
+ let total=0, allItems=[];
+ ords.forEach(o=>o.items.forEach(it=>{ total+=it.p*it.qty; allItems.push(it); }));
+ allItems.forEach(it=>h+=`<div class="order-line"><span>${it.qty}x ${it.n}</span><span>${fmt(it.p*it.qty)}</span></div>`);
+ h+=`<div class="total">Total: ${fmt(total)}</div>`;
+ h+=`<div class="cat-title">Dividir cuenta entre</div><input type="number" id="split" min="1" value="1" style="max-width:100px">`;
+ h+=`<div class="cat-title">Método de pago</div>
+ <select id="pay"><option value="efectivo">Efectivo</option><option value="tarjeta">Tarjeta</option><option value="mixto">Mixto</option></select>`;
+ h+=`<button class="btn-primary" style="width:100%;margin-top:14px" onclick="closeTable(${total})">Cobrar y cerrar mesa</button>`;
+ return h;
+}
+async function closeTable(total){
+ const pay=document.getElementById("pay").value;
+ const split=Number(document.getElementById("split").value)||1;
+ const ords=Object.values(STATE.orders).filter(o=>o.table===activeTable&&o.status!=="entregada");
+ const items=[]; ords.forEach(o=>items.push(...o.items));
+ const sale={id:"s"+Date.now(),table:activeTable,items,total,pay,split,employee:session.name,ts:Date.now()};
+ STATE.sales.push(sale);
+ ords.forEach(o=>o.status="entregada");
+ if(STATE.tables[activeTable]) STATE.tables[activeTable]={status:"libre"};
+ printTicket(sale);
+ await save();
+ activeTable=null; view="mesas"; render();
+}
+function printTicket(sale){
+ let h=`<h3>El Cazo Loco</h3><p>${tableLabel(sale.table)} · ${new Date(sale.ts).toLocaleString()}</p><hr>`;
+ sale.items.forEach(it=>h+=`<div>${it.qty}x ${it.n} — ${fmt(it.p*it.qty)}</div>`);
+ h+=`<hr><b>Total: ${fmt(sale.total)}</b>`;
+ if(sale.split>1) h+=`<p>Dividido en ${sale.split}: ${fmt(sale.total/sale.split)} c/u</p>`;
+ h+=`<p>Pago: ${sale.pay}</p><p>Atendió: ${sale.employee}</p>`;
+ document.getElementById("print-area").innerHTML=h;
+ setTimeout(()=>window.print(),200);
+}
+
+function renderAdmin(){
+ const now=Date.now(), day=86400000;
+ const today=STATE.sales.filter(s=>now-s.ts<day);
+ const week=STATE.sales.filter(s=>now-s.ts<7*day);
+ const month=STATE.sales.filter(s=>now-s.ts<30*day);
+ const sum=arr=>arr.reduce((a,s)=>a+s.total,0);
+ let h=`<h2 style="color:var(--brown)">Panel de administrador</h2>`;
+ h+=`<div class="grid">
+  <div class="card"><b>Hoy</b><div class="total">${fmt(sum(today))}</div><span class="small">${today.length} ventas</span></div>
+  <div class="card"><b>Semana</b><div class="total">${fmt(sum(week))}</div><span class="small">${week.length} ventas</span></div>
+  <div class="card"><b>Mes</b><div class="total">${fmt(sum(month))}</div><span class="small">${month.length} ventas</span></div>
+ </div>`;
+ h+=`<div class="cat-title">Inventario</div>`;
+ Object.entries(STATE.inventory).forEach(([k,v])=>{
+  const low=v.stock<=v.min;
+  h+=`<div class="item-row" style="${low?'border:2px solid var(--red)':''}">
+   <div>${v.name} ${low?'⚠️ Bajo':''}</div>
+   <div class="flex"><input type="number" id="inv-${k}" value="${v.stock}" style="width:70px">
+   <button class="btn-ghost" onclick="updInv('${k}')">Actualizar</button></div></div>`;
+ });
+ h+=`<div class="cat-title">Empleados</div>`;
+ USERS.forEach(u=>h+=`<div class="item-row"><div>${u.name}</div><div class="small">${u.role}</div></div>`);
+ return h;
+}
+async function updInv(k){
+ STATE.inventory[k].stock=Number(document.getElementById("inv-"+k).value);
+ await save();
+}
+
+boot();
+</script>
+</body>
+</html>

@@ -130,6 +130,13 @@ const CARNE_TIPOS=["Maciza jugosa","Buche","Chamorro","Cuerito","Surtido"];
 const TACO_TIPOS=["Maciza","Surtido"];
 const SALSAS=["Salsa roja","Guacamole","Pico de gallo","Cebolla con habanero"];
 const SALSA_PRECIO=13, SALSA_MAX=3;
+const REFRESCOS=[{n:"Refresco 400ml desechable",p:25},{n:"Refresco 500ml vidrio",p:28}];
+const MESA_PESO=[
+ {key:"cuarto", label:"Cuarto de kilo (¼ kg)", pMaciza:80, pSurtido:75},
+ {key:"medio", label:"Medio kilo (½ kg)", pMaciza:150, pSurtido:145},
+ {key:"kilo", label:"Kilo (1 kg)", pMaciza:300, pSurtido:290},
+];
+const SERVICIO_MESA=20;
 
 const MENU=[
  {cat:"Carnitas",items:[
@@ -357,45 +364,68 @@ function renderOrden(){
    ${salsaCheckboxes("qSalsa")}
    <button class="btn-primary" style="width:100%;margin-top:12px" onclick="addQuickCarne()">+ Agregar</button>
   </div>`;
- }
 
- MENU.forEach(c=>{
-  h+=`<div class="cat-title">${c.cat}</div>`;
-  if(c.cat==="Tacos y Tortas"){
-   c.items.forEach((it,i)=>{
-    if(customizingTacoIdx===i){
-     h+=`<div class="quick-box pop" style="margin-bottom:9px">
-      <div style="font-weight:700;margin-bottom:8px">${it.n} <span class="small">${fmt(it.p)} base</span></div>
-      <label class="small">Tipo de carne</label>
-      <select id="tacoTipo_${i}">${TACO_TIPOS.map(t=>`<option value="${t}">${t}</option>`).join("")}</select>
-      <div style="margin-top:10px">${salsaCheckboxes("tacoSalsa_"+i)}</div>
-      <div class="flex" style="margin-top:12px">
-       <button class="btn-primary" onclick="confirmCustomizeTaco(${i})">✅ Agregar</button>
-       <button class="btn-ghost" onclick="cancelCustomizeTaco()">Cancelar</button>
-      </div>
-     </div>`;
-    } else {
+  MENU.forEach(c=>{
+   h+=`<div class="cat-title">${c.cat}</div>`;
+   if(c.cat==="Tacos y Tortas"){
+    c.items.forEach((it,i)=>{
+     if(customizingTacoIdx===i){
+      h+=`<div class="quick-box pop" style="margin-bottom:9px">
+       <div style="font-weight:700;margin-bottom:8px">${it.n} <span class="small">${fmt(it.p)} base</span></div>
+       <label class="small">Tipo de carne</label>
+       <select id="tacoTipo_${i}">${TACO_TIPOS.map(t=>`<option value="${t}">${t}</option>`).join("")}</select>
+       <div style="margin-top:10px">${salsaCheckboxes("tacoSalsa_"+i)}</div>
+       <div class="flex" style="margin-top:12px">
+        <button class="btn-primary" onclick="confirmCustomizeTaco(${i})">✅ Agregar</button>
+        <button class="btn-ghost" onclick="cancelCustomizeTaco()">Cancelar</button>
+       </div>
+      </div>`;
+     } else {
+      h+=`<div class="item-row"><div>${it.n}<div class="price">${fmt(it.p)}</div></div>
+      <button class="btn-ghost" onclick="openCustomizeTaco(${i})">+ Agregar</button></div>`;
+     }
+    });
+   } else {
+    c.items.forEach((it,i)=>{
      h+=`<div class="item-row"><div>${it.n}<div class="price">${fmt(it.p)}</div></div>
-     <button class="btn-ghost" onclick="openCustomizeTaco(${i})">+ Agregar</button></div>`;
-    }
-   });
-  } else {
-   c.items.forEach((it,i)=>{
+     <button class="btn-ghost" onclick="addItem('${c.cat}',${i})">+ Agregar</button></div>`;
+    });
+   }
+  });
+ } else {
+  const tacoCat=MENU.find(c=>c.cat==="Tacos y Tortas");
+  h+=`<div class="cat-title first">🌮 Tacos, Tortas y Quesadillas</div>`;
+  tacoCat.items.forEach((it,i)=>{
+   if(customizingTacoIdx===i){
+    h+=`<div class="quick-box pop" style="margin-bottom:9px">
+     <div style="font-weight:700;margin-bottom:8px">${it.n} <span class="small">${fmt(it.p)}</span></div>
+     <label class="small">Tipo de carne</label>
+     <select id="mesaTacoTipo_${i}">${CARNE_TIPOS.map(t=>`<option value="${t}">${t}</option>`).join("")}</select>
+     <div class="flex" style="margin-top:12px">
+      <button class="btn-primary" onclick="confirmMesaTaco(${i})">✅ Agregar</button>
+      <button class="btn-ghost" onclick="cancelCustomizeTaco()">Cancelar</button>
+     </div>
+    </div>`;
+   } else {
     h+=`<div class="item-row"><div>${it.n}<div class="price">${fmt(it.p)}</div></div>
-    <button class="btn-ghost" onclick="addItem('${c.cat}',${i})">+ Agregar</button></div>`;
-   });
-  }
- });
+    <button class="btn-ghost" onclick="openCustomizeTaco(${i})">+ Agregar</button></div>`;
+   }
+  });
 
- if(!takeout){
-  h+=`<div class="quick-box" style="margin-top:22px">
-   <div class="cat-title first">🧮 Monto personalizado</div>
-   <div class="flex" style="align-items:flex-end">
-    <div style="width:130px"><label class="small">Precio ($)</label><input type="number" id="customPrice" placeholder="120"></div>
-    <div style="flex:1;min-width:140px"><label class="small">Descripción</label><input type="text" id="customDesc" placeholder="Carnitas al gusto"></div>
-    <button class="btn-ghost" onclick="addCustomItem()">+ Agregar</button>
-   </div>
-  </div>`;
+  h+=`<div class="cat-title">🍖 Carnitas para la mesa</div>`;
+  MESA_PESO.forEach(w=>{
+   h+=`<div class="item-row" style="flex-wrap:wrap">
+    <div style="flex:1;min-width:150px">${w.label}<div class="price">desde ${fmt(w.pSurtido)} + $${SERVICIO_MESA} servicio</div></div>
+    <select id="mesaTipo_${w.key}" style="width:160px">${CARNE_TIPOS.map(t=>`<option value="${t}">${t}</option>`).join("")}</select>
+    <button class="btn-ghost" onclick="addMesaCarnitas('${w.key}')">+ Agregar</button>
+   </div>`;
+  });
+
+  h+=`<div class="cat-title">🥤 Refrescos</div>`;
+  REFRESCOS.forEach((it,i)=>{
+   h+=`<div class="item-row"><div>${it.n}<div class="price">${fmt(it.p)} + $${SERVICIO_MESA} servicio</div></div>
+   <button class="btn-ghost" onclick="addMesaRefresco(${i})">+ Agregar</button></div>`;
+  });
  }
 
  h+=`<div class="cat-title">📝 Nota</div><textarea id="note" placeholder="Sin cebolla, salsas, instrucciones..." oninput="draftNote=this.value">${draftNote}</textarea>`;
@@ -471,6 +501,36 @@ function confirmCustomizeTaco(i){
  const ex=cart.find(x=>x.n===n);
  if(ex) ex.qty++; else cart.push({n, p:price, qty:1});
  customizingTacoIdx=null;
+ render();
+}
+function confirmMesaTaco(i){
+ const cat=MENU.find(c=>c.cat==="Tacos y Tortas");
+ const it=cat.items[i];
+ const tipoEl=document.getElementById("mesaTacoTipo_"+i);
+ const tipo=tipoEl?tipoEl.value:"";
+ const n=it.n+" ("+tipo+")";
+ const ex=cart.find(x=>x.n===n);
+ if(ex) ex.qty++; else cart.push({n, p:it.p, qty:1});
+ customizingTacoIdx=null;
+ render();
+}
+function addMesaCarnitas(key){
+ const w=MESA_PESO.find(x=>x.key===key);
+ const tipoEl=document.getElementById("mesaTipo_"+key);
+ const tipo=tipoEl?tipoEl.value:"";
+ const base=tipo==="Surtido"?w.pSurtido:w.pMaciza;
+ const price=base+SERVICIO_MESA;
+ const n="Carnitas "+tipo+" "+w.label+" + servicio mesa ($"+SERVICIO_MESA+")";
+ const ex=cart.find(x=>x.n===n);
+ if(ex) ex.qty++; else cart.push({n, p:price, qty:1});
+ render();
+}
+function addMesaRefresco(i){
+ const it=REFRESCOS[i];
+ const n=it.n+" + servicio mesa ($"+SERVICIO_MESA+")";
+ const price=it.p+SERVICIO_MESA;
+ const ex=cart.find(x=>x.n===n);
+ if(ex) ex.qty++; else cart.push({n, p:price, qty:1});
  render();
 }
 async function sendOrder(){
